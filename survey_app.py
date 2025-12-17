@@ -5,7 +5,9 @@ from pyecharts.charts import Bar, Pie
 from streamlit_echarts import st_pyecharts
 import pandas as pd
 import datetime
-import time 
+import time
+# ✨✨✨ 新增库：用于自动刷新 ✨✨✨
+from streamlit_autorefresh import st_autorefresh
 
 # ================= 1. 配置与连接 =================
 try:
@@ -20,7 +22,7 @@ except Exception:
     AUTH = ("neo4j", "wE7pV36hqNSo43mpbjTlfzE7n99NWcYABDFqUGvgSrk")
     ADMIN_PWD = "admin888"
 
-# 数据库连接缓存（保持稳定）
+# 数据库连接缓存
 @st.cache_resource
 def get_driver():
     try:
@@ -65,7 +67,6 @@ class SurveyBackend:
     def reset_database(self):
         if not self.driver: return
         with self.driver.session() as session:
-            # ✨✨✨ 修复：使用 consume() 确保删除操作在返回前真正执行完毕 ✨✨✨
             result = session.run("MATCH (r:SurveyResponse) DETACH DELETE r")
             result.consume() 
 
@@ -127,6 +128,11 @@ with st.sidebar:
                 else: st.error("密码错误")
         else:
             st.success("✅ 管理员已登录"); 
+            
+            # ✨✨✨ 新增功能：自动刷新开关 ✨✨✨
+            st.markdown("---")
+            # 默认开启，每 5000 毫秒 (5秒) 刷新一次
+            do_refresh = st.toggle("⚡ 开启实时刷新 (5s)", value=True)
             if st.button("退出登录"): st.session_state['admin_auth'] = False; st.rerun()
 
 # --- 场景 A：教师/学员填报 ---
@@ -174,6 +180,13 @@ if role == "👨‍🏫 我是老师 (填报)":
 # --- 场景 B：管理员后台 ---
 elif role == "🔧 管理员后台 (查看)":
     if st.session_state['admin_auth']:
+        
+        # ✨✨✨ 注入自动刷新逻辑 ✨✨✨
+        # 只有当开关开启，且处于管理员界面时才运行
+        # key 确保了这个刷新器是唯一的
+        if do_refresh:
+            st_autorefresh(interval=5000, limit=None, key="admin_dashboard_refresh")
+
         st.title("📊 调研结果看板")
         raw_data = app.get_all_data()
         df = pd.DataFrame(raw_data)
@@ -181,13 +194,14 @@ elif role == "🔧 管理员后台 (查看)":
         col_k1, col_k2, col_k3 = st.columns(3)
         col_k1.metric("已填报人数", len(df))
         col_k2.metric("最新提交", df.iloc[0]['name'] if not df.empty else "-")
-        col_k3.metric("刷新时间", datetime.datetime.now().strftime("%H:%M:%S"))
+        # 显示秒数，方便你确认是否在刷新
+        col_k3.metric("最后同步", datetime.datetime.now().strftime("%H:%M:%S"))
         
         if not df.empty:
             tab1, tab2, tab3 = st.tabs(["📈 图表分析", "📋 原始数据", "⚙️ 管理"])
             
             with tab1:
-                st.info("💡 提示：柱状图支持横向滚动，鼠标悬停可查看数值。")
+                st.info("💡 提示：看板每 5 秒自动刷新数据。")
                 st.markdown("#### Q1: AI 熟悉程度")
                 st_pyecharts(plot_pie(df, "q1", ""), height="400px")
                 st.divider()
@@ -214,24 +228,17 @@ elif role == "🔧 管理员后台 (查看)":
             with tab2:
                 st.dataframe(df, use_container_width=True)
                 st.download_button("下载 .csv", df.to_csv(index=False).encode('utf-8-sig'), "data.csv")
-            
             with tab3:
                 st.warning("危险区域")
-                # ✨✨✨ 修复逻辑：拆分 Checkbox 和 Button ✨✨✨
                 confirm_clear = st.checkbox("我确认要清空所有数据", key="confirm_delete")
                 if confirm_clear:
                     if st.button("🔴 立即清空数据库", type="primary"):
                         app.reset_database()
                         st.toast("🗑️ 数据库已清空")
                         time.sleep(1)
-                        st.rerun() # 强制刷新页面
+                        st.rerun()
         else: 
-            st.info("暂无数据")
-            # 空数据状态下也提供清空按钮，以防万一
+            st.info("暂无数据，等待填报...")
             if st.button("强制重置数据库"):
                 app.reset_database()
-                st.rerun()
-    else:
-        st.warning("🔒 请输入管理密码")
-
-# 不再调用 app.close()
+                st.re
