@@ -2,4 +2,5 @@ streamlit
 neo4j
 pyecharts
 streamlit-echarts
+streamlit-autorefresh
 pandas
